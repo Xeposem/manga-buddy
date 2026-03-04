@@ -22,11 +22,21 @@ class ModelLoader(QObject):
             from core.translator import Translator
             translator = Translator()
 
-            self.status.emit("Loading pinyin converter...")
-            from core.pinyin_converter import PinyinConverter
-            pinyin_conv = PinyinConverter()
+            self.status.emit("Loading phonetic converters...")
+            from core.phonetic_converter import (
+                ChinesePinyinConverter,
+                JapaneseFuriganaConverter,
+                JapaneseRomajiConverter,
+                KoreanRomanizer,
+            )
+            converters = {
+                "chinese_pinyin": ChinesePinyinConverter(),
+                "japanese_furigana": JapaneseFuriganaConverter(),
+                "japanese_romaji": JapaneseRomajiConverter(),
+                "korean": KoreanRomanizer(),
+            }
 
-            self.finished.emit(ocr, translator, pinyin_conv)
+            self.finished.emit(ocr, translator, converters)
         except Exception as e:
             self.error.emit(str(e))
 
@@ -63,10 +73,10 @@ def main():
         splash.setText(msg)
         app.processEvents()
 
-    def on_finished(ocr, translator, pinyin_conv):
+    def on_finished(ocr, translator, converters):
         splash.close()
         from ui.main_window import MainWindow
-        window = MainWindow(ocr, translator, pinyin_conv)
+        window = MainWindow(ocr, translator, converters)
         window.show()
         app._main_window = window
 

@@ -3,10 +3,30 @@ from deep_translator import GoogleTranslator
 from models.text_region import TextRegion
 from core.text_grouper import group_regions, group_text, group_bbox
 
+# Map user-facing language names to GoogleTranslator source codes
+SOURCE_LANG_MAP = {
+    "chinese": "zh-CN",
+    "japanese": "ja",
+    "korean": "ko",
+}
+
 
 class Translator:
-    def __init__(self):
-        self._translator = GoogleTranslator(source='zh-CN', target='en')
+    def __init__(self, source_lang: str = "chinese"):
+        self._source_lang = source_lang
+        self._translator = GoogleTranslator(
+            source=SOURCE_LANG_MAP.get(source_lang, "zh-CN"),
+            target="en",
+        )
+
+    def set_source_lang(self, lang: str):
+        """Switch the source language at runtime."""
+        if lang != self._source_lang:
+            self._source_lang = lang
+            self._translator = GoogleTranslator(
+                source=SOURCE_LANG_MAP.get(lang, "zh-CN"),
+                target="en",
+            )
 
     def translate(self, text: str) -> str:
         if not text.strip():

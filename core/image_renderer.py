@@ -1,22 +1,51 @@
+import os
+
 from PIL import Image, ImageDraw, ImageFont
 
 from models.text_region import TextRegion
 from core.text_grouper import group_bbox
 
+# Candidate fonts in preference order.  CJK-capable fonts come first so that
+# Japanese text, romaji with diacritics, and mixed CJK/Latin all render
+# correctly.  Paths cover Windows, macOS, and common Linux locations.
+_FONT_CANDIDATES = [
+    # Windows – CJK-capable
+    "C:/Windows/Fonts/meiryo.ttc",
+    "C:/Windows/Fonts/msgothic.ttc",
+    "C:/Windows/Fonts/YuGothM.ttc",
+    "C:/Windows/Fonts/msyh.ttc",
+    # Windows – good Latin/Unicode fallback
+    "C:/Windows/Fonts/segoeui.ttf",
+    "C:/Windows/Fonts/arial.ttf",
+    # macOS
+    "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc",
+    "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+    # Linux – Noto CJK
+    "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
+]
+
+
+def _find_system_font():
+    """Return the first available font path from the candidate list."""
+    for path in _FONT_CANDIDATES:
+        if os.path.isfile(path):
+            return path
+    return None
+
 
 class ImageRenderer:
     def __init__(self):
         self._font_cache = {}
+        self._font_path = _find_system_font()
 
     def _get_font(self, size: int) -> ImageFont.FreeTypeFont:
         if size not in self._font_cache:
-            try:
-                self._font_cache[size] = ImageFont.truetype("arial.ttf", size)
-            except OSError:
-                try:
-                    self._font_cache[size] = ImageFont.truetype("C:/Windows/Fonts/arial.ttf", size)
-                except OSError:
-                    self._font_cache[size] = ImageFont.load_default()
+            if self._font_path:
+                self._font_cache[size] = ImageFont.truetype(self._font_path, size)
+            else:
+                self._font_cache[size] = ImageFont.load_default()
         return self._font_cache[size]
 
     def render(self, image: Image.Image, placements: list,
