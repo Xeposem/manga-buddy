@@ -177,47 +177,154 @@ class TextPlacer:
     def place_pinyin_per_char(self, region: TextRegion, overlay: str = "never") -> list:
         """Place pinyin above/beside each character based on text orientation.
 
-        overlay: "never"/"auto" places beside, "always" places on top.
+        Vertical: beside the character (to the right or left — consistent).
+        Horizontal: above or below the character — consistent.
+        Uses collision detection to avoid covering other text regions.
+
         Returns list of (pinyin_text, x, y, font_size) — one per character.
         """
         if not region.char_pinyin:
             return []
 
-        use_overlay = overlay == "always" or overlay is True
+        force_overlay = overlay == "always" or overlay is True
+        MIN_FONT = 11
+        MAX_FONT = 16
         n = len(region.char_pinyin)
-        placements = []
+
+        if force_overlay:
+            return self._place_pinyin_overlay(region, n, MIN_FONT, MAX_FONT)
 
         if region.is_vertical:
-            char_h = region.h / n
-            font_size = max(8, min(int(char_h * 0.4), 14))
+            return self._place_pinyin_vertical(region, n, MIN_FONT, MAX_FONT)
+        else:
+            return self._place_pinyin_horizontal(region, n, MIN_FONT, MAX_FONT)
 
+    def _place_pinyin_overlay(self, region, n, min_font, max_font):
+        """Place annotations directly on top of the characters."""
+        placements = []
+        if region.is_vertical:
+            char_h = region.h / n
+            font_size = max(min_font, min(int(char_h * 0.45), max_font))
             for i, (char, py) in enumerate(region.char_pinyin):
-                if use_overlay:
-                    cx = region.x
-                    cy = region.y + int(i * char_h)
-                else:
-                    cx = region.x + region.w + 3
-                    cy = region.y + int(i * char_h + char_h * 0.3)
-                cx, cy = self._clamp(cx, cy, int(len(py) * font_size * 0.6) + 4, font_size + 4)
+                if not py:
+                    continue
+                py_w = int(len(py) * font_size * 0.6) + 4
+                py_h = font_size + 4
+                cx = region.x
+                cy = region.y + int(i * char_h)
+                cx, cy = self._clamp(cx, cy, py_w, py_h)
                 placements.append((py, cx, cy, font_size))
+                self.occupied.append((cx, cy, py_w, py_h))
         else:
             char_w = region.w / n
-            font_size = max(8, min(int(char_w * 0.45), 14))
-            pinyin_h = font_size + 4
-
+            font_size = max(min_font, min(int(char_w * 0.5), max_font))
             for i, (char, py) in enumerate(region.char_pinyin):
-                py_pixel_w = len(py) * font_size * 0.55
-
-                if use_overlay:
-                    cx = region.x + int(i * char_w + char_w / 2 - py_pixel_w / 2)
-                    cy = region.y
-                else:
-                    cx = region.x + int(i * char_w + char_w / 2 - py_pixel_w / 2)
-                    cy = region.y - pinyin_h - 1
-
-                cx, cy = self._clamp(cx, cy, int(py_pixel_w) + 4, pinyin_h)
+                if not py:
+                    continue
+                py_pixel_w = int(len(py) * font_size * 0.55) + 4
+                cx = region.x + int(i * char_w + char_w / 2 - py_pixel_w / 2)
+                cy = region.y
+                cx, cy = self._clamp(cx, cy, py_pixel_w, font_size + 4)
                 placements.append((py, cx, cy, font_size))
+                self.occupied.append((cx, cy, py_pixel_w, font_size + 4))
+        return placements
 
+    def _place_pinyin_vertical(self, region, n, min_font, max_font):
+        """Place annotations beside vertical text, consistent side for all."""
+        char_h = region.h / n
+        font_size = max(min_font, min(int(char_h * 0.45), max_font))
+
+        # Determine the widest annotation to test side fit
+        max_py_w = 0
+        for char, py in region.char_pinyin:
+            if py:
+                pw = int(len(py) * font_size * 0.6) + 4
+                max_py_w = max(max_py_w, pw)
+        py_h = font_size + 4
+
+        # Vote: count how many chars fit on each side
+        right_fits = 0
+        left_fits = 0
+        for i, (char, py) in enumerate(region.char_pinyin):
+            if not py:
+                continue
+            pw = int(len(py) * font_size * 0.6) + 4
+            cy = region.y + int(i * char_h + char_h * 0.3)
+            rx = region.x + region.w + 3
+            if self._fits(rx, cy, pw, py_h):
+                right_fits += 1
+            lx = region.x - pw - 3
+            if self._fits(lx, cy, pw, py_h):
+                left_fits += 1
+
+        # Pick the side where more chars fit; prefer right on tie
+        side = "right" if right_fits >= left_fits else "left"
+
+        placements = []
+        for i, (char, py) in enumerate(region.char_pinyin):
+            if not py:
+                continue
+            pw = int(len(py) * font_size * 0.6) + 4
+            cy = region.y + int(i * char_h + char_h * 0.3)
+
+            if side == "right":
+                cx = region.x + region.w + 3
+                if not self._fits(cx, cy, pw, py_h):
+                    # Can't fit on chosen side — overlay this char
+                    cx = region.x
+                    cy = region.y + int(i * char_h)
+            else:
+                cx = region.x - pw - 3
+                if not self._fits(cx, cy, pw, py_h):
+                    cx = region.x
+                    cy = region.y + int(i * char_h)
+
+            cx, cy = self._clamp(cx, cy, pw, py_h)
+            placements.append((py, cx, cy, font_size))
+            self.occupied.append((cx, cy, pw, py_h))
+        return placements
+
+    def _place_pinyin_horizontal(self, region, n, min_font, max_font):
+        """Place annotations above/below horizontal text, consistent side."""
+        char_w = region.w / n
+        font_size = max(min_font, min(int(char_w * 0.5), max_font))
+        pinyin_h = font_size + 4
+
+        # Vote: count how many chars fit above vs below
+        above_fits = 0
+        below_fits = 0
+        for i, (char, py) in enumerate(region.char_pinyin):
+            if not py:
+                continue
+            pw = int(len(py) * font_size * 0.55) + 4
+            cx = region.x + int(i * char_w + char_w / 2 - pw / 2)
+            if self._fits(cx, region.y - pinyin_h - 1, pw, pinyin_h):
+                above_fits += 1
+            if self._fits(cx, region.y + region.h + 1, pw, pinyin_h):
+                below_fits += 1
+
+        # Pick the side where more chars fit; prefer above on tie
+        side = "above" if above_fits >= below_fits else "below"
+
+        placements = []
+        for i, (char, py) in enumerate(region.char_pinyin):
+            if not py:
+                continue
+            pw = int(len(py) * font_size * 0.55) + 4
+            cx = region.x + int(i * char_w + char_w / 2 - pw / 2)
+
+            if side == "above":
+                cy = region.y - pinyin_h - 1
+                if not self._fits(cx, cy, pw, pinyin_h):
+                    cy = region.y  # overlay fallback
+            else:
+                cy = region.y + region.h + 1
+                if not self._fits(cx, cy, pw, pinyin_h):
+                    cy = region.y  # overlay fallback
+
+            cx, cy = self._clamp(cx, cy, pw, pinyin_h)
+            placements.append((py, cx, cy, font_size))
+            self.occupied.append((cx, cy, pw, pinyin_h))
         return placements
 
     def compute_placements(self, regions: list, mode: str = "translation",
