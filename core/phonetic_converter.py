@@ -188,10 +188,8 @@ class JapaneseRomajiConverter(PhoneticConverter):
             if len(orig) == 1:
                 pairs.append((orig, romaji))
             elif all(_is_kana(ch) for ch in orig):
-                # Kana-only group: convert individually
-                for ch in orig:
-                    r = self._kakasi.convert(ch)
-                    pairs.append((ch, r[0]["hepburn"] if r else ch))
+                # Kana-only group: convert with sokuon handling
+                pairs.extend(self._convert_kana_chars(orig))
             elif orig == romaji:
                 # Unchanged (punctuation, ASCII, etc.)
                 for ch in orig:
@@ -200,6 +198,24 @@ class JapaneseRomajiConverter(PhoneticConverter):
                 # Mixed kanji+kana: split so each part gets its romaji
                 pairs.extend(self._split_romaji(orig, romaji))
 
+        return pairs
+
+    def _convert_kana_chars(self, kana_str):
+        """Convert kana string to per-character romaji pairs, handling sokuon."""
+        pairs = []
+        chars = list(kana_str)
+        for i, ch in enumerate(chars):
+            if ch in ('っ', 'ッ') and i + 1 < len(chars):
+                # Sokuon: doubles the next consonant
+                next_r = self._kakasi.convert(chars[i + 1])
+                next_romaji = next_r[0]["hepburn"] if next_r else ""
+                if next_romaji and next_romaji[0].isalpha():
+                    pairs.append((ch, next_romaji[0]))
+                else:
+                    pairs.append((ch, ""))
+            else:
+                r = self._kakasi.convert(ch)
+                pairs.append((ch, r[0]["hepburn"] if r else ch))
         return pairs
 
     def _split_romaji(self, orig, romaji):
@@ -236,10 +252,9 @@ class JapaneseRomajiConverter(PhoneticConverter):
             kanji_romaji = kanji_romaji[:-len(suffix_romaji)]
 
         pairs = []
-        # Prefix kana: individual romaji
-        for ch in prefix_kana:
-            r = self._kakasi.convert(ch)
-            pairs.append((ch, r[0]["hepburn"] if r else ch))
+        # Prefix kana: individual romaji with sokuon handling
+        if prefix_kana:
+            pairs.extend(self._convert_kana_chars(prefix_kana))
 
         # Kanji core
         if len(kanji_core) == 1:
@@ -249,10 +264,9 @@ class JapaneseRomajiConverter(PhoneticConverter):
             for ch in kanji_core[1:]:
                 pairs.append((ch, ""))
 
-        # Suffix kana: individual romaji
-        for ch in suffix_kana:
-            r = self._kakasi.convert(ch)
-            pairs.append((ch, r[0]["hepburn"] if r else ch))
+        # Suffix kana: individual romaji with sokuon handling
+        if suffix_kana:
+            pairs.extend(self._convert_kana_chars(suffix_kana))
 
         return pairs
 
